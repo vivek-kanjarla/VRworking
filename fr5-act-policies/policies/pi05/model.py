@@ -1,0 +1,177 @@
+"""
+policies/pi05/model.py — π0.5 (pi05) flow-matching VLA for the FR5.
+
+Wraps lerobot's PI05Policy (lerobot==0.5.1).
+
+⚠️  REQUIRES PALIGEMMA WEIGHTS (gated HuggingFace download ~5 GB):
+    huggingface-cli login
+    # accept licence at https://huggingface.co/google/paligemma-3b-pt-224
+
+Differences from pi0
+────────────────────
+• tokenizer_max_length = 200  (longer context window for richer language)
+• Uses QUANTILE normalization convention internally (we still do mean-std
+  in the wrapper and set IDENTITY so the policy doesn't double-normalise)
+• Otherwise identical architecture and inference path
+
+Everything else (PaliGemma backbone, Gemma 300M action expert, flow-matching
+objective, image [0,1]→[-1,1] normalization) is the same as pi0.
+"""
+
+from dataclasses import dataclass
+
+import torch
+import torch.nn as nn
+
+from lerobot.policies.pi05.configuration_pi05 import PI05Config as _LRConfig
+from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+from lerobot.configs.types import PolicyFeature, FeatureType, NormalizationMode
+
+try:
+    from transformers import AutoTokenizer
+    _HAS_TOKENIZER = True
+except ImportError:
+    _HAS_TOKENIZER = False
+
+STATE_KEY      = "observation.state"
+IMAGE_KEY      = "observation.images.wrist_cam"
+ACTION_KEY     = "action"
+LANG_TOKENS    = "observation.language.tokens"
+LANG_ATTN_MASK = "observation.language.attention_mask"
+
+_IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+_IMAGENET_STD  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+_PALIGEMMA_TOKENIZER = "google/paligemma-3b-pt-224"
+
+
+@dataclass
+class Pi05Config:
+    state_dim:  int  = 6
+    action_dim: int  = 7
+    chunk_size: int  = 50
+    use_image:  bool = True
+    num_inference_steps:   int = 10
+    max_state_dim:         int = 32
+    max_action_dim:        int = 32
+    paligemma_variant:     str = "gemma_2b"
+    action_expert_variant: str = "gemma_300m"
+    tokenizer_max_length:  int = 200    # longer than pi0's 48
+
+
+def _lerobot_config(cfg: Pi05Config) -> _LRConfig:
+    input_features = {
+        STATE_KEY: PolicyFeature(type=FeatureType.STATE, shape=(cfg.state_dim,)),
+    }
+    norm_map = {
+        "STATE":  NormalizationMode.IDENTITY,
+        "ACTION": NormalizationMode.IDENTITY,
+    }
+    if cfg.use_image:
+        input_features[IMAGE_KEY] = PolicyFeature(type=FeatureType.VISUAL,
+                                                   shape=(3, 224, 224))
+        norm_map["VISUAL"] = NormalizationMode.IDENTITY
+
+    return _LRConfig(
+        n_obs_steps=1,
+        chunk_size=cfg.chunk_size,
+        n_action_steps=cfg.chunk_size,
+        input_features=input_features,
+        output_features={ACTION_KEY: PolicyFeature(type=FeatureType.ACTION,
+                                                    shape=(cfg.action_dim,))},
+        normalization_mapping=norm_map,
+        paligemma_variant=cfg.paligemma_variant,
+        action_expert_variant=cfg.action_expert_variant,
+        max_state_dim=cfg.max_state_dim,
+        max_action_dim=cfg.max_action_dim,
+        num_inference_steps=cfg.num_inference_steps,
+        tokenizer_max_length=cfg.tokenizer_max_length,
+    )
+
+
+class Pi05(nn.Module):
+    def __init__(self, cfg: Pi05Config, stats: dict):
+        super().__init__()
+        self.cfg    = cfg
+        self.policy = PI05Policy(_lerobot_config(cfg))
+
+        if _HAS_TOKENIZER:
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(_PALIGEMMA_TOKENIZER)
+            except Exception:
+                self.tokenizer = None
+        else:
+            self.tokenizer = None
+
+        self.register_buffer("state_mean",  torch.as_tensor(stats["state_mean"]).float())
+        self.register_buffer("state_std",   torch.as_tensor(stats["state_std"]).float())
+        self.register_buffer("action_mean", torch.as_tensor(stats["action_mean"]).float())
+        self.register_buffer("action_std",  torch.as_tensor(stats["action_std"]).float())
+        self.register_buffer("_imagenet_mean", _IMAGENET_MEAN.clone())
+        self.register_buffer("_imagenet_std",  _IMAGENET_STD.clone())
+
+    def _norm_state(self, s):    return (s - self.state_mean) / self.state_std
+    def _norm_action(self, a):   return (a - self.action_mean) / self.action_std
+    def _unnorm_action(self, a): return a * self.action_std + self.action_mean
+
+    def _to_raw(self, img):
+        return (img * self._imagenet_std + self._imagenet_mean).clamp(0, 1)
+
+    def _tokenize(self, task, device):
+        B = len(task) if isinstance(task, list) else 1
+        if self.tokenizer is None:
+            ids  = torch.zeros(B, self.cfg.tokenizer_max_length, dtype=torch.long, device=device)
+            mask = torch.zeros(B, self.cfg.tokenizer_max_length, dtype=torch.long, device=device)
+            return ids, mask
+        if isinstance(task, str):
+            task = [task]
+        enc = self.tokenizer(task, return_tensors="pt", padding="max_length",
+                             truncation=True, max_length=self.cfg.tokenizer_max_length)
+        return enc["input_ids"].to(device), enc["attention_mask"].to(device)
+
+    def _make_batch(self, obs_state, actions=None, action_is_pad=None,
+                    obs_image=None, task=None):
+        # State: always (B, state_dim) — pi05 adds seq dim internally in embed_suffix.
+        dev  = obs_state.device
+        B    = obs_state.shape[0]
+        task = task or [""] * B
+        batch = {STATE_KEY: self._norm_state(obs_state)}
+        if self.cfg.use_image and obs_image is not None:
+            batch[IMAGE_KEY] = self._to_raw(obs_image)
+        ids, mask = self._tokenize(task, dev)
+        batch[LANG_TOKENS]    = ids
+        batch[LANG_ATTN_MASK] = mask
+        if actions is not None:
+            batch[ACTION_KEY]      = self._norm_action(actions)
+            batch["action_is_pad"] = action_is_pad
+        return batch
+
+    def forward(self, obs_state, actions, action_is_pad, obs_image=None, task=None):
+        loss, _ = self.policy.forward(
+            self._make_batch(obs_state, actions, action_is_pad, obs_image, task)
+        )
+        return loss, loss.item(), 0.0
+
+    def reset(self):
+        self.policy.reset()
+
+    @torch.no_grad()
+    def predict(self, obs_state, obs_image=None, task=None):
+        action_norm = self.policy.select_action(
+            self._make_batch(obs_state, obs_image=obs_image, task=task)
+        )
+        return self._unnorm_action(action_norm)
+
+
+def build_model(cfg: dict, stats: dict, device) -> Pi05:
+    m, d = cfg["model"], cfg["dataset"]
+    model_cfg = Pi05Config(
+        state_dim=m["state_dim"], action_dim=m["action_dim"],
+        chunk_size=d["chunk_size"], use_image=d["use_image"],
+        num_inference_steps=m.get("num_inference_steps", 10),
+        max_state_dim=m.get("max_state_dim", 32),
+        max_action_dim=m.get("max_action_dim", 32),
+        paligemma_variant=m.get("paligemma_variant", "gemma_2b"),
+        action_expert_variant=m.get("action_expert_variant", "gemma_300m"),
+        tokenizer_max_length=m.get("tokenizer_max_length", 200),
+    )
+    return Pi05(model_cfg, stats).to(device)

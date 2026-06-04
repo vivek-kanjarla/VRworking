@@ -1,0 +1,39 @@
+# DiT + flow-matching — laptop / quick validation run (5 epochs on the 2 demo episodes).
+# Run from repo root:
+#   python common/train.py --policy dit_flow --config policies/dit_flow/config.local.yaml
+#
+# Note: first run downloads CLIP ViT-B/16 (~400 MB). Subsequent runs use the cache.
+
+dataset:
+  root: "lerobot_dataset"
+  chunk_size: 32
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+  aug_level: "crops"    # DiT uses CLIP vision — background replacement interacts with CLIP norm, use crops only
+
+model:
+  state_dim: 6
+  action_dim: 7
+  objective: "flow_matching"
+  num_integration_steps: 10
+  integration_method: "euler"
+  hidden_dim: 256        # smaller than paper-scale for speed
+  num_layers: 4
+  num_heads: 8
+  dropout: 0.1
+  vision_encoder_name: "openai/clip-vit-base-patch16"
+  text_encoder_name: "openai/clip-vit-base-patch16"
+  tokenizer_max_length: 77
+
+training:
+  batch_size: 8
+  lr: 2.0e-5
+  weight_decay: 0.0
+  max_epochs: 5
+  grad_clip: 10.0
+  save_every: 1
+  log_every: 50
+  checkpoint_dir: "policies/dit_flow/checkpoints"
+  device: "auto"
+  seed: 42

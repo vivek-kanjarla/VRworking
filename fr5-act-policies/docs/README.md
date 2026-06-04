@@ -1,0 +1,93 @@
+# policy explainers
+
+plain-English deep dives on each policy in this repo — what it is, how it works, the math, and how it differs from the others. read in this order; each builds on the last.
+
+> **how they differ at deployment** — query cadence, temporal ensembling, action queues, the
+> 30 Hz budget, and per-model latency are compared in one place in [`inference.md`](inference.md).
+>
+> **want to learn by coding?** [`exercises/`](exercises/) has from-scratch PyTorch exercises
+> (attention, CVAE, DDPM/DDIM, flow matching, DiT/AdaLN, FAST tokenization, temporal ensembling)
+> with stubs + self-checks + tested solutions. run `python docs/exercises/check_all.py`.
+
+| # | doc | model | one-liner |
+|---|---|---|---|
+| 1 | [act.md](act.md) | **ACT** | transformer directly predicts a 100-step action chunk; CVAE captures demo variability |
+| 2 | [diffusion_policy.md](diffusion_policy.md) | **Diffusion Policy** | denoise a corrupted action chunk back to clean (DDPM + 1-D U-Net) |
+| 3 | [dit_flow.md](dit_flow.md) | **DiT + Flow Matching** | same denoising idea, but transformer denoiser + straight-line flow matching + language |
+| 4 | [pi0.md](pi0.md) | **π0** | flow matching, but the encoder is a full 2B vision-language model (PaliGemma) |
+| 5 | [pi05.md](pi05.md) | **π0.5** | π0 tuned for open-world generalization (longer language, quantile norm, co-training) |
+| 6 | [pi0_fast.md](pi0_fast.md) | **π0-FAST** | π0's backbone, but actions become discrete tokens generated like text (no ODE) |
+
+---
+
+## data & inference pipeline
+
+```mermaid
+flowchart LR
+    subgraph Record
+        A[Human Teleoperation\n100 Hz CSV + 30 fps video]
+    end
+    subgraph Convert
+        B[convert_episodes.py\nresample → LeRobot v3 dataset]
+    end
+    subgraph Train
+        C[FR5Dataset\naugmentation + chunking]
+        D{policy}
+        D -->|ACT| E[CVAE + Transformer]
+        D -->|Diffusion| F[U-Net DDIM]
+        D -->|DiT+Flow| G[DiT Euler ODE]
+        D -->|π0 family| H[PaliGemma VLA]
+    end
+    subgraph Deploy
+        I[deploy.py\n30 Hz control loop]
+        J[FR5 Robot]
+    end
+    A --> B --> C --> D
+    E & F & G & H --> I --> J
+```
+
+---
+
+## the big picture — two families
+
+```
+DIRECT PREDICTION                 ITERATIVE GENERATION
+─────────────────                 ────────────────────
+ACT                               Diffusion Policy ─┐
+  predict actions                   denoise (DDPM)  │
+  in one forward pass               U-Net           │
+  CVAE for multimodality                            │  same "corrupt the
+                                  DiT + Flow Matching│  future, learn to
+                                    denoise (flow)   │  correct it" DNA
+                                    transformer      │
+                                    + language       │
+                                                     │
+                                  π0 / π0.5 ─────────┤
+                                    flow matching    │
+                                    + 2B VLM brain   │
+                                                     │
+                                  π0-FAST ───────────┘
+                                    actions as tokens
+                                    (autoregressive)
+```
+
+**the shared paradigm** (everything except ACT): condition on the present (images + joints + maybe language), corrupt the future action chunk with noise, train the network to predict the correction. they differ in *how* they corrupt (DDPM vs flow matching vs tokenization), *what* denoiser they use (U-Net vs DiT vs full VLM), and *whether* they use language.
+
+**ACT** sits apart: no denoising, just direct prediction with a CVAE latent for handling demo variability.
+
+---
+
+## how to pick one
+
+| your situation | use |
+|---|---|
+| simplest baseline, CPU ok, single task | **ACT** |
+| multimodal task (many valid solutions), have a GPU | **Diffusion Policy** |
+| want language conditioning + modern flow recipe | **DiT + Flow Matching** |
+| want a pretrained foundation model, multi-task, generalization | **π0 / π0.5** |
+| same as π0 but inference speed is critical | **π0-FAST** |
+
+> reality check for this repo: we have very few demonstrations. these are pipeline
+> integrations, not trained-to-convergence policies. ACT and Diffusion Policy are the
+> realistic ones to actually train here; the π0 family needs a GPU + PaliGemma weights
+> and shines with large/diverse data.

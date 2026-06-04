@@ -1,0 +1,38 @@
+# ACT on 61 VR-teleop FR5 episodes — DUAL camera + ResNet34 + paper-scale decoder.
+# bf16 autocast (Blackwell) for speed + VRAM headroom; best.pt = best-val (early stop).
+#   .venv/bin/python common/train.py --policy act --config policies/act/config.fr5.yaml
+dataset:
+  root: "lerobot_dataset"
+  cameras: ["wrist_cam", "scene_cam"]   # both cameras as observations
+  chunk_size: 100
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.12           # 61 eps -> ~54 train / 7 val
+  aug_level: "crops"       # random crop + colour jitter (regularizes)
+
+model:
+  state_dim: 6
+  action_dim: 7
+  latent_dim: 32
+  d_model: 512             # paper-scale (was 256)
+  nhead: 8
+  num_encoder_layers: 4
+  num_decoder_layers: 7    # paper-scale (was 1)
+  dim_feedforward: 3200    # paper-scale (was 1024)
+  dropout: 0.2             # regularization (anti-overfit)
+  temporal_ensemble_coeff: null
+  vision_backbone: "resnet34"   # deeper than resnet18 (drop-in, 512-dim features)
+
+training:
+  batch_size: 96           # bf16 frees VRAM; bigger batch = higher GPU use + fewer steps
+  num_workers: 22          # 24-core box; keep the GPU fed
+  lr: 3.0e-5
+  weight_decay: 1.0e-4
+  max_epochs: 80
+  grad_clip: 10.0
+  kl_weight: 10.0
+  save_every: 5
+  log_every: 50
+  checkpoint_dir: "policies/act/checkpoints_fr5_paperscale"
+  device: "auto"
+  seed: 42

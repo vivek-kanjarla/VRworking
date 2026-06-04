@@ -1,0 +1,40 @@
+# π0 (pi0) — flow-matching VLA, full-scale config.
+# ⚠️  REQUIRES PALIGEMMA WEIGHTS (~5 GB, gated HuggingFace download):
+#     huggingface-cli login
+#     # accept licence: https://huggingface.co/google/paligemma-3b-pt-224
+# Run from repo root:
+#     python common/train.py --policy pi0
+
+dataset:
+  root: "../so101-fr5-teleop/lerobot_dataset"
+  chunk_size: 50          # pi0 default (1.67 s at 30 Hz)
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+  aug_level: "crops"      # crops only — pi0 uses SigLIP norm internally
+
+model:
+  state_dim: 6
+  action_dim: 7
+
+  # pi0 architecture (must match PaliGemma variant)
+  paligemma_variant: "gemma_2b"
+  action_expert_variant: "gemma_300m"
+  max_state_dim: 32
+  max_action_dim: 32
+  tokenizer_max_length: 48
+
+  # flow-matching inference
+  num_inference_steps: 10
+
+training:
+  batch_size: 4           # pi0 is large — reduce if OOM
+  lr: 2.5e-5
+  weight_decay: 0.01
+  max_epochs: 100
+  grad_clip: 1.0
+  save_every: 10
+  log_every: 50
+  checkpoint_dir: "policies/pi0/checkpoints"
+  device: "cuda"          # pi0 requires CUDA — too large for CPU/MPS
+  seed: 42

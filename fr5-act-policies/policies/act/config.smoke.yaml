@@ -1,0 +1,36 @@
+# Tiny config for SMOKE-TESTING the pipeline end-to-end (not for real training).
+# Points at the self-contained dataset built by:
+#   python common/convert_episodes.py --out _smoke_dataset --extract-frames --max-frames 60
+# Run from the repo root:
+#   python common/train.py --policy act --config policies/act/config.smoke.yaml
+dataset:
+  root: "_smoke_dataset"
+  chunk_size: 20
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.5            # only 2 episodes -> 1 train / 1 val
+
+model:
+  state_dim: 6
+  action_dim: 7
+  latent_dim: 8
+  d_model: 64
+  nhead: 4
+  num_encoder_layers: 1
+  num_decoder_layers: 1
+  dim_feedforward: 128
+  dropout: 0.1
+  temporal_ensemble_coeff: null   # inference-only; disabled for the smoke test
+
+training:
+  batch_size: 2
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  max_epochs: 1
+  grad_clip: 10.0
+  kl_weight: 10.0
+  save_every: 1
+  log_every: 5
+  checkpoint_dir: "policies/act/checkpoints_smoke"
+  device: "cpu"
+  seed: 42

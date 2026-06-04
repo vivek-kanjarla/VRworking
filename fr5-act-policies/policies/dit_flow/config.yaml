@@ -1,0 +1,45 @@
+# DiT + flow-matching policy — full-scale training config.
+# Run from repo root:
+#   python common/train.py --policy dit_flow
+#
+# First run downloads CLIP ViT-B/16 weights (~400 MB, cached after that).
+# Requires the lerobot dataset at dataset.root (build with common/convert_episodes.py).
+
+dataset:
+  root: "../so101-fr5-teleop/lerobot_dataset"   # relative to repo root
+  chunk_size: 32          # horizon = n_action_steps (full chunk executed per query)
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+
+model:
+  state_dim: 6
+  action_dim: 7
+
+  # flow matching (set to "diffusion" + noise_scheduler: DDIM for DDIM baseline)
+  objective: "flow_matching"
+  num_integration_steps: 10    # Euler ODE steps at inference; 10 balances speed/quality
+  integration_method: "euler"  # "euler" | "rk4"
+
+  # DiT transformer
+  hidden_dim: 512
+  num_layers: 6
+  num_heads: 8
+  dropout: 0.1
+
+  # CLIP encoders (vision + language share the same checkpoint)
+  vision_encoder_name: "openai/clip-vit-base-patch16"
+  text_encoder_name: "openai/clip-vit-base-patch16"
+  tokenizer_max_length: 77
+
+training:
+  batch_size: 8
+  lr: 2.0e-5
+  weight_decay: 0.0
+  max_epochs: 100
+  grad_clip: 10.0
+  save_every: 10
+  log_every: 50
+  checkpoint_dir: "policies/dit_flow/checkpoints"
+  device: "auto"
+  seed: 42

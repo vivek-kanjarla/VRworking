@@ -1,0 +1,37 @@
+# Real training run on the 2 converted episodes (5401 frames @ 30 Hz).
+# Smaller than the paper-scale config.yaml so it finishes on a laptop GPU/CPU.
+# This is a pipeline demonstration run, not a tuned policy (2 demos is tiny).
+# Run from the repo root:
+#   python common/train.py --policy act --config policies/act/config.local.yaml
+dataset:
+  root: "lerobot_dataset"
+  chunk_size: 100
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+  aug_level: "full"     # "none" | "crops" (Tier 1) | "full" (Tier 1 + background replacement)            # 2 episodes -> 1 train / 1 val
+
+model:
+  state_dim: 6
+  action_dim: 7
+  latent_dim: 32
+  d_model: 256
+  nhead: 8
+  num_encoder_layers: 4
+  num_decoder_layers: 1
+  dim_feedforward: 1024
+  dropout: 0.1
+  temporal_ensemble_coeff: null   # inference-only; set in deploy if wanted
+
+training:
+  batch_size: 8
+  lr: 1.0e-5
+  weight_decay: 1.0e-4
+  max_epochs: 5
+  grad_clip: 10.0
+  kl_weight: 10.0
+  save_every: 1
+  log_every: 50
+  checkpoint_dir: "policies/act/checkpoints"
+  device: "auto"
+  seed: 42

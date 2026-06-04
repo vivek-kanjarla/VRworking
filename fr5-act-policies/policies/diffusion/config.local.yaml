@@ -1,0 +1,39 @@
+# Diffusion Policy — laptop/quick validation run (5 epochs on 2 demo episodes).
+# Run from repo root:
+#   python common/train.py --policy diffusion --config policies/diffusion/config.local.yaml
+dataset:
+  root: "lerobot_dataset"
+  chunk_size: 16
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+  aug_level: "full"
+
+model:
+  state_dim: 6
+  action_dim: 7
+  n_action_steps: 8
+  down_dims: [256, 512, 1024]   # smaller than paper-scale
+  kernel_size: 5
+  n_groups: 8
+  diffusion_step_embed_dim: 128
+  use_film_scale_modulation: true
+  num_train_timesteps: 100
+  beta_schedule: "squaredcos_cap_v2"
+  prediction_type: "epsilon"
+  num_inference_steps: 10
+  noise_scheduler_type: "DDPM"
+  vision_backbone: "resnet18"
+  pretrained_backbone_weights: null
+
+training:
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 1.0e-6
+  max_epochs: 5
+  grad_clip: 10.0
+  save_every: 1
+  log_every: 50
+  checkpoint_dir: "policies/diffusion/checkpoints"
+  device: "auto"
+  seed: 42

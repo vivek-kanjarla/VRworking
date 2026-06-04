@@ -1,0 +1,46 @@
+# Diffusion Policy (DDPM) — full-scale training config.
+# Run from repo root:
+#   python common/train.py --policy diffusion
+dataset:
+  root: "../so101-fr5-teleop/lerobot_dataset"
+  chunk_size: 16          # horizon; U-Net predicts this many steps
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+
+model:
+  state_dim: 6
+  action_dim: 7
+  n_action_steps: 8       # steps executed per chunk (chunk_size / 2)
+
+  # U-Net
+  down_dims: [512, 1024, 2048]
+  kernel_size: 5
+  n_groups: 8
+  diffusion_step_embed_dim: 128
+  use_film_scale_modulation: true
+
+  # DDPM noise schedule
+  num_train_timesteps: 100
+  beta_schedule: "squaredcos_cap_v2"
+  prediction_type: "epsilon"
+
+  # DDIM inference (10 steps instead of 100 — matches original DP paper)
+  num_inference_steps: 10
+  noise_scheduler_type: "DDPM"
+
+  # Vision
+  vision_backbone: "resnet18"
+  pretrained_backbone_weights: null   # GroupNorm is incompatible with pretrained BatchNorm weights
+
+training:
+  batch_size: 64
+  lr: 1.0e-4
+  weight_decay: 1.0e-6
+  max_epochs: 100
+  grad_clip: 10.0
+  save_every: 10
+  log_every: 50
+  checkpoint_dir: "policies/diffusion/checkpoints"
+  device: "auto"
+  seed: 42

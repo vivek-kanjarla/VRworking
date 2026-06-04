@@ -1,0 +1,33 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# ── virtual envs ────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── recorded data (raw episodes + converted datasets) ───
+episodes/
+_smoke_dataset/
+*/lerobot_dataset/
+lerobot_dataset/
+
+# ── training artifacts ──────────────────────────────────
+policies/*/checkpoints/
+policies/*/checkpoints_smoke/
+checkpoints/
+checkpoints_smoke/
+*.pt
+*.ckpt
+
+# ── misc ────────────────────────────────────────────────
+.DS_Store
+*.log
+
+# local planning notes (keep out of the repo)
+NEXT_MODELS.md
+AUGMENTATION.md
+CONTROL_FREQUENCIES.md

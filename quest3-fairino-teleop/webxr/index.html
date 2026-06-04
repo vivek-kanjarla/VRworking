@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#111; }
+#vrBtn {
+  width:100%; height:100%; background:#14532d; color:#fff;
+  font-size:4vw; font-weight:bold; border:none; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:15px; font-family:sans-serif;
+}
+#info { font-size:1.8vw; color:#86efac; font-family:monospace; max-width:95vw; word-break:break-all; }
+#glCanvas { display:none; }
+</style>
+</head>
+<body>
+<canvas id="glCanvas"></canvas>
+<button id="vrBtn">
+  <span id="status">🔄 Connecting...</span>
+  <span style="font-size:5vw">▶ TAP ANYWHERE</span>
+  <span style="font-size:2vw;color:#86efac">v7 — thumbstick=buttons</span>
+  <span id="info">—</span>
+</button>
+
+<script>
+let ws, session=null, refSpace=null, started=false, frameN=0;
+let gl=null;
+
+const canvas = document.getElementById('glCanvas');
+gl = canvas.getContext('webgl', {xrCompatible: true});
+
+function setStatus(m) { document.getElementById('status').textContent = m; }
+function setInfo(m)   { document.getElementById('info').textContent = m; }
+function send(o)      { try { if(ws?.readyState===1) ws.send(JSON.stringify(o)); } catch(e){} }
+
+(function connect() {
+  ws = new WebSocket('wss://' + window.location.hostname + ':8013');
+  ws.onopen = () => {
+    send({type:'hello', has_session:!!session, frame:frameN});
+    setStatus(navigator.xr ? '🔄 Checking XR...' : '❌ No navigator.xr');
+    if (!navigator.xr) return;
+    navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+      send({type:'xr_check', ok});
+      setStatus(ok ? '✅ TAP ANYWHERE' : '❌ VR not supported');
+      setInfo('immersive-vr: ' + ok);
+    });
+  };
+  ws.onclose = () => { setStatus('🔄 WS reconnecting...'); setTimeout(connect, 1500); };
+  ws.onerror = (e) => send({type:'ws_error', msg:String(e)});
+})();
+
+document.getElementById('vrBtn').addEventListener('click', startVR);
+
+async function startVR(e) {
+  if (e.type !== 'auto') send({type:'event', k:e.type});
+  if (started || session) return;
+  started = true;
+  send({type:'btn_clicked'});
+  setStatus('⏳ Requesting session...');
+
+  let sess = null;
+  for (const rf of ['local-floor', 'local']) {
+    try {
+      sess = await navigator.xr.requestSession('immersive-vr', {requiredFeatures:[rf], optionalFeatures:['hand-tracking']});
+      refSpace = await sess.requestReferenceSpace(rf);
+      send({type:'session_ok', refSpace:rf});
+      break;
+    } catch(e2) {
+      send({type:'session_try_failed', refSpace:rf, msg:e2.message});
+      sess = null;
+    }
+  }
+  if (!sess) {
+    started = false;
+    setStatus('❌ All session attempts failed');
+    return;
+  }
+
+  // Attach WebGL layer so Meta Browser keeps the session alive
+  try {
+    await gl.makeXRCompatible();
+    const xrLayer = new XRWebGLLayer(sess, gl);
+    sess.updateRenderState({baseLayer: xrLayer});
+    send({type:'gl_layer_ok'});
+  } catch(e3) {
+    send({type:'gl_layer_err', msg:e3.message});
+  }
+
+  session = sess;
+  setStatus('🟢 VR ACTIVE');
+  send({type:'vr_started', vis:session.visibilityState});
+
+  session.addEventListener('visibilitychange', () => {
+    send({type:'vis_change', vis:session.visibilityState});
+    setInfo('vis: ' + session.visibilityState);
+  });
+  session.addEventListener('end', () => {
+    send({type:'session_end'});
+    session=null; refSpace=null; started=false; frameN=0;
+    setStatus('🔄 Session ended — restarting...');
+    setTimeout(() => { startVR({type:'auto'}); }, 1500);
+  });
+
+  frameN = 0;
+  session.requestAnimationFrame(onFrame);
+  send({type:'raf_queued'});
+}
+
+function onFrame(t, xrFrame) {
+  frameN++;
+  session.requestAnimationFrame(onFrame);
+
+  // Render blank frame so Meta Browser doesn't kill the session
+  const glLayer = session.renderState.baseLayer;
+  if (glLayer) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  }
+
+  if (frameN <= 5 || frameN % 60 === 1) {
+    const sources = Array.from(xrFrame.session.inputSources);
+    const s = sources.map(s=>s.handedness+(s.gripSpace?'G':'')+(s.targetRaySpace?'T':'')).join(',') || 'none';
+    send({type:'frame_info', f:frameN, src:s, vis:session.visibilityState});
+    setInfo('f:'+frameN+' ['+s+']');
+  }
+
+  const sources = Array.from(xrFrame.session.inputSources);
+  const rightSrc = sources.find(s => s.handedness === 'right');
+  const leftSrc  = sources.find(s => s.handedness === 'left');
+
+  if (!rightSrc) return;
+  const rSpace = rightSrc.gripSpace || rightSrc.targetRaySpace;
+  if (!rSpace) return;
+  const rPose = xrFrame.getPose(rSpace, refSpace);
+  if (!rPose) {
+    if (frameN % 60 === 1) send({type:'pose_null', f:frameN, vis:session.visibilityState});
+    return;
+  }
+
+  const rp = rPose.transform.position, rq = rPose.transform.orientation;
+  const rtrig = rightSrc.gamepad?.buttons[0]?.value ?? 0;
+  const rgrip = rightSrc.gamepad?.buttons[1]?.value ?? 0;
+
+  const btns = Array.from(rightSrc.gamepad?.buttons ?? []).map(b=>+b.value.toFixed(3));
+  // Quest 3 Meta Browser: thumbstick exposed via split-buttons, NOT axes
+  //   btns[7]  = X+  (push right)     btns[10] = X-  (push left)
+  //   btns[8]  = Y+  (push down)      btns[11] = Y-  (push up)
+  //   btns[9]  = touch indicator (capacitive, binary)
+  const jx = (btns[7]  ?? 0) - (btns[10] ?? 0);   // +1=right, -1=left
+  const jy = (btns[8]  ?? 0) - (btns[11] ?? 0);   // +1=down,  -1=up
+  // A/B on the right Quest controller (xr-standard: A=btns[4], B=btns[5]).
+  const bA = btns[4] ?? 0;   // A → ACT record toggle
+  const bB = btns[5] ?? 0;   // B → ACT success toggle
+  // X/Y on the LEFT Quest controller → J6 roll (X=CW, Y=CCW).
+  const lbtns = Array.from(leftSrc?.gamepad?.buttons ?? []).map(b=>+b.value.toFixed(3));
+  const bX = lbtns[4] ?? 0;
+  const bY = lbtns[5] ?? 0;
+  if (frameN % 30 === 1) {
+    setInfo('t:'+rtrig.toFixed(2)+' A:'+bA+' B:'+bB+' | L X:'+bX+' Y:'+bY);
+  }
+
+  send({
+    x:rp.x, y:rp.y, z:rp.z,
+    qx:rq.x, qy:rq.y, qz:rq.z, qw:rq.w,
+    trigger:rtrig, grip:rgrip,
+    joy_x:jx, joy_y:jy,
+    btn_a:bA, btn_b:bB,
+    btn_x:bX, btn_y:bY
+  });
+  setInfo('✅ t:'+rtrig.toFixed(2)+' J:'+jx.toFixed(2)+'/'+jy.toFixed(2));
+}
+</script>
+</body>
+</html>

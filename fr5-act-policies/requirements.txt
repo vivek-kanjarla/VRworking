@@ -1,0 +1,21 @@
+# NOTE: install into a fresh venv — lerobot 0.5.1 caps torch/vision/numpy below
+# the very latest releases, so it conflicts with a bleeding-edge system stack.
+#   python3.12 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
+# core
+numpy>=2.0,<2.3
+pandas>=2.2
+pyarrow>=14.0
+pyyaml>=6.0
+
+# viz / eda
+matplotlib>=3.7
+jupyterlab>=4.0
+
+# deep learning (versions pinned to what lerobot 0.5.1 supports)
+torch>=2.7,<2.11
+torchvision>=0.22,<0.26
+
+# lerobot (pulls in transformers, huggingface-hub, datasets, opencv-headless,
+# torchcodec, gymnasium, etc.). The API used by training/model.py targets 0.5.x.
+lerobot==0.5.1

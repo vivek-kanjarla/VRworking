@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+episodes/
+act_dataset/
+*.csv
+*.mp4
+*.npy
+*.npz
+.env
+excalidraw.log
+episode_instruction.txt

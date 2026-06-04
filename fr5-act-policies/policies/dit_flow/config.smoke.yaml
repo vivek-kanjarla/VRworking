@@ -1,0 +1,39 @@
+# DiT + flow-matching — CPU smoke-test config (checks pipeline wiring only).
+# Run from repo root:
+#   python common/smoke_test.py dit_flow
+#
+# CLIP ViT-B/16 is still used — cached after first run (~400 MB download).
+# num_integration_steps: 2 keeps the ODE sampling fast for testing.
+
+dataset:
+  root: "_smoke_dataset"
+  chunk_size: 20
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.5
+
+model:
+  state_dim: 6
+  action_dim: 7
+  objective: "flow_matching"
+  num_integration_steps: 2    # minimal ODE steps for speed
+  integration_method: "euler"
+  hidden_dim: 128
+  num_layers: 2
+  num_heads: 4
+  dropout: 0.1
+  vision_encoder_name: "openai/clip-vit-base-patch16"
+  text_encoder_name: "openai/clip-vit-base-patch16"
+  tokenizer_max_length: 77
+
+training:
+  batch_size: 2
+  lr: 2.0e-5
+  weight_decay: 0.0
+  max_epochs: 1
+  grad_clip: 10.0
+  save_every: 1
+  log_every: 5
+  checkpoint_dir: "policies/dit_flow/checkpoints_smoke"
+  device: "cpu"
+  seed: 42

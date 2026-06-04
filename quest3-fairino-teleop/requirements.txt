@@ -1,0 +1,16 @@
+numpy
+pandas
+pynput
+pyrealsense2
+opencv-python
+vuer
+
+# fairino is Fairino's official Python SDK.
+# Install from their distribution package (not PyPI):
+#   pip install fairino-*.whl
+# or if available on PyPI for your firmware version:
+#   pip install fairino
+
+# Quest 3 oculus_reader transport (optional — needed only for "oculus_reader" mode):
+#   pip install oculus_reader
+#   Requires ADB: sudo apt-get install android-tools-adb

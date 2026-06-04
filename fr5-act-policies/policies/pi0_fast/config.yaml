@@ -1,0 +1,37 @@
+# π0-FAST — autoregressive VLA (FAST action tokenisation, no ODE steps).
+# ⚠️  REQUIRES PALIGEMMA WEIGHTS (~5 GB, gated HuggingFace download):
+#     huggingface-cli login
+#     # accept licence: https://huggingface.co/google/paligemma-3b-pt-224
+#     Also downloads lerobot/fast-action-tokenizer (public, small).
+# Run from repo root:
+#     python common/train.py --policy pi0_fast
+#
+# Key difference from pi0/pi05: NO flow-matching ODE. Actions are VQ-tokenised
+# and generated autoregressively — single forward pass, much faster inference.
+
+dataset:
+  root: "../so101-fr5-teleop/lerobot_dataset"
+  chunk_size: 50
+  use_image: true
+  image_size: [224, 224]
+  val_frac: 0.1
+  aug_level: "crops"
+
+model:
+  state_dim: 6
+  action_dim: 7
+  max_state_dim: 32
+  max_action_dim: 32
+  tokenizer_max_length: 200
+
+training:
+  batch_size: 4
+  lr: 2.5e-5
+  weight_decay: 0.01
+  max_epochs: 100
+  grad_clip: 1.0
+  save_every: 10
+  log_every: 50
+  checkpoint_dir: "policies/pi0_fast/checkpoints"
+  device: "cuda"
+  seed: 42
